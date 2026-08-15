@@ -354,3 +354,299 @@ SSH service is enabled, but connection are rejected.
 Upgrading SRM is failing.
 
 Wi-Fi Connect does not allow to manage parameters.
+
+## Open the router
+6 screws must be removed, of which 2 are under the dome-shaped rubber feet and one under the label (this may void the warranty). Once done, 10 plastic clips (4 on a long edge, 1 on a short one) must be released to open the case.
+
+The PCB is protected by two large heat sinks, fortunately a 6-pin header is accessible!
+
+### UART connection
+
+Pinout of the 6-pin header J4:
+| Pin | Description |
+| --- | --- |
+|  2  | GND |
+|  4  | RX |
+|  6  | TX |
+|  1  | VCC 3.3V |
+|  3  | Maybe RST |
+|  5  | Maybe 12V power input |
+Pin numbers 1, 2, 5 and 6 visible on the silkscreen.
+
+Connecting a serial interface using 3.3V on GND, RX and TX, allows to see the boot process and some messages from the system.
+Boot can be interrupted `Ctlr+C to interrupt`.
+
+User is not logged automatically, but admin account can be used with the previously defined password.
+```
+SynologyRouter login: admin
+Password:
+
+admin@SynologyRouter:~$
+```
+
+Upgrading the router was possible from the console, using command `sudo synoupgrade --auto`.
+
+```sh
+Copyright (c) 2003-2014 Synology Inc. All rights reserved.
+
+        --auto
+        --check
+        --download
+        --start
+        --patch ABSOULATE_UPGRADE_FILE_PATH
+        --cksum
+```
+
+Two upgrades were done to reach the latest release, all are successful. However, the problem is still present.
+
+These messages does not sound good:
+```
+[    6.135676] 1b700000.pci supply vdda not found, using dummy regulator
+[    6.135791] 1b700000.pci supply vdda_phy not found, using dummy regulator
+[    6.135885] 1b700000.pci supply vdda_refclk not found, using dummy regulator
+[    6.136810] PCI host bridge /soc/pci@1b700000 ranges:
+[    6.136853]    IO 0x31e00000..0x31efffff -> 0x31e00000
+[    6.136875]   MEM 0x2e000000..0x31dfffff -> 0x2e000000
+[    7.259191] qcom-pcie 1b700000.pci: phy link never came up
+[    7.261207] qcom-pcie 1b700000.pci: hostinit failed
+[    7.261225] qcom-pcie 1b700000.pci: cannot initialize host
+[    7.261748] qcom-pcie: probe of 1b700000.pci failed with error -110
+```
+
+# Extras
+## Reconstruct missing data
+
+The function `SYNO.API.Util.GetValByAPI` is located in `sds.js`:
+```js
+SYNO.API.Util.GetValByAPI = function (response, api, method, property) {
+  if (Ext.isObject(response)) {
+    if (Ext.isArray(response.result)) {
+      var result = response.result;
+      for (var index = 0; index < result.length; index++) {
+        if (api === result[index].api && method === result[index].method) {
+          var properties = result[index].data || result[index].error;
+          if (!properties) {
+            return
+          }
+          if (property) {
+            return properties[property]
+          }
+          return properties
+        }
+      }
+      return
+    } else {
+      if (property) {
+        return response[property]
+      } else {
+        return response
+      }
+    }
+  }
+  return
+};
+```
+
+```js
+// FirstTimeInstall.js:1290
+var s = SYNO.API.Util.GetValByAPI(a, 'SYNO.Wifi.Network.Setting', 'get', 'profiles');
+var e = s.filter(function (x) { return (0 === x.id) }) [0];
+var p = SYNO.API.Util.GetValByAPI(a, 'SYNO.Wifi.CountryCode.Capability', 'get');
+var n = p.country_codes;
+var o = p.immutable;
+var b = SYNO.API.Util.GetValByAPI(a, 'SYNO.Wifi.CountryCode.Setting', 'get', 'country_code');
+// FirstTimeInstall.js:1333
+this.defaultParams = {
+  countryCodeList: n,
+  immutable: o,
+  currentCountryCode: b,
+  networkProfile: e,
+// FirstTimeInstall.js:1144
+loadData: function (a) {
+  this.countryCodeStore.loadData(a.countryCodeList);
+  if (true === a.immutable) {
+    this.getForm().findField('location').setValue(a.currentCountryCode);
+    Ext.getCmp(this.countryCodeFieldId).hide();
+    Ext.getCmp(this.noteFieldId).hide()
+  }
+},
+// FirstTimeInstall.js:1088
+this.countryCodeStore = new Ext.data.ArrayStore({
+    fields: ['value', 'display']
+}),
+// FirstTimeInstall.js:1686
+    getWifiProfileSetting: function (ssid, password) {
+      var b = this.defaultParams.networkProfile;
+      b.radio_list.forEach(
+        function (d) {
+          d.security.password = a;
+          switch (d.radio_type) {
+            case 'SmartConnect':
+              d.ssid = c;
+              break;
+            case '2.4G':
+              d.ssid = c + '_2.4G';
+              break;
+            case '5G':
+              d.ssid = c + '_5G';
+              break;
+            case '5G-1':
+              d.ssid = c + '_5G-1';
+              break;
+            case '5G-2':
+              d.ssid = c + '_5G-2';
+              break
+          }
+        }
+      );
+      return [b]
+    },
+
+```
+
+```json
+{
+    "data": {
+        "has_fail": true,
+        "result": [
+            {
+                "api": "SYNO.Wifi.CountryCode.Capability",
+                "data": {
+                    "country_codes": [
+                        { "value": "TW", "display": "Taiwwan" }
+                    ],
+                    "immutable": true
+                },
+                "method": "get",
+                "success": true,
+                "version": 1
+            },
+            {
+                "api": "SYNO.Wifi.CountryCode.Setting",
+                "data": {
+                    "country_code": "TW"
+                },
+                "method": "get",
+                "success": true,
+                "version": 1
+            },
+            {
+                "api": "SYNO.Wifi.Network.Setting",
+                "data": {
+                    "profiles": [
+                        {
+                            "id": 0,
+                            "radio_list": [
+                                {
+                                    "radio_type": "SmartConnect",
+                                    "security": {
+                                        // "password": "synology"
+                                    },
+                                    // "ssid": "Synology_SERIAL"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "method": "get",
+                "success": true,
+                "version": 1
+            },
+            {
+                "api": "SYNO.Core.Region.NTP",
+                "data": {
+                    "zonedata": [
+                        {
+                            "display": "...",
+                            "value": "..."
+                        },
+                        {
+                            "display": "(GMT+08:00) Taipei",
+                            "value": "Taipei"
+                        },
+                        {
+                            "display": "...",
+                            "value": "..."
+                        }
+                    ]
+                },
+                "method": "listzone",
+                "success": true,
+                "version": 1
+            },
+            {
+                "api": "SYNO.Core.Group.Member",
+                "data": {
+                    "offset": 0,
+                    "total": 1,
+                    "users": [
+                        {
+                            "description": "System default user",
+                            "name": "admin",
+                            "uid": 1024
+                        }
+                    ]
+                },
+                "method": "list",
+                "success": true,
+                "version": 1
+            },
+            {
+                "api": "SYNO.Core.User",
+                "data": {
+                    "offset": 0,
+                    "total": 2,
+                    "users": [
+                        {
+                            "description": "System default user",
+                            "name": "admin",
+                            "uid": 1024
+                        },
+                        {
+                            "description": "Guest",
+                            "name": "guest",
+                            "uid": 1025
+                        }
+                    ]
+                },
+                "method": "list",
+                "success": true,
+                "version": 1
+            },
+            {
+                "api": "SYNO.Core.Network.MACClone",
+                "data": {
+                    "mac": "xx:re:da:ct:ed:xx"
+                },
+                "method": "getRemoteMACAddress",
+                "success": true,
+                "version": 1
+            },
+            {
+                "api": "SYNO.Core.Network.Router.ConnectionList",
+                "data": {
+                    "stations": [
+                        {
+                            "asso_time": "16:04:05 2022/12/31",
+                            "brand": "",
+                            "connection": "ethernet",
+                            "hostname": "COMPUTER",
+                            "ip": "192.168.1.179",
+                            "ip6": "",
+                            "mac": "xx:re:da:ct:ed:xx",
+                            "model": "",
+                            "netif": "lbr0",
+                            "status": true,
+                            "type": "default"
+                        }
+                    ]
+                },
+                "method": "get",
+                "success": true,
+                "version": 1
+            }
+        ]
+    },
+    "success": true
+}
+```
